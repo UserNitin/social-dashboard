@@ -1,0 +1,269 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+{% if not profile_complete %}
+<h3>Setup your API credentials</h3>
+<form method="post" class="card p-4 shadow-sm mb-4" style="max-width: 700px;">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn btn-success">Save Settings</button>
+</form>
+{% else %}
+
+<div class="row">
+    <div class="col-md-4" style="flex: 0 0 30%; max-width: 30%;">
+        <h4>Discord Chat</h4>
+        <div id="discord-messages" class="scroll-box mb-2" style="height: 500px; overflow-y: auto;">Loading messages...</div>
+        <form id="discord-message-form" class="d-flex gap-2">
+            {% csrf_token %}
+            <input type="text" id="discord-message-input" name="content" class="form-control" placeholder="Enter message" required />
+            <button class="btn btn-primary" type="submit">Send</button>
+            <button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#scheduleDiscordModal">Schedule</button>
+        </form>
+        <!-- Schedule Discord Message Modal -->
+        <div class="modal fade" id="scheduleDiscordModal" tabindex="-1" aria-labelledby="scheduleDiscordModalLabel" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <form id="discord-schedule-form">
+                {% csrf_token %}
+                <div class="modal-header">
+                  <h5 class="modal-title" id="scheduleDiscordModalLabel">Schedule Discord Message</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <input type="text" id="discord-schedule-message" name="message" placeholder="Message" class="form-control mb-2" required />
+                  <input type="datetime-local" id="discord-schedule-time" name="scheduled_time" class="form-control mb-2" required />
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button class="btn btn-primary" type="submit">Schedule</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+    </div>
+
+    <div class="col-md-8" style="flex: 0 0 70%; max-width: 70%;">
+        <h4>Reddit Posts - /r/{{ profile.reddit_subreddit }}</h4>
+        <div id="reddit-posts" class="scroll-box mb-3" style="height: 500px; overflow-y: auto;">Loading posts...</div>
+
+        <div class="d-flex justify-content-end mb-2">
+            <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#scheduleModal">Schedule Reddit Post</button>
+        </div>
+
+        <!-- Schedule Reddit Post Modal -->
+        <div class="modal fade" id="scheduleModal" tabindex="-1" aria-labelledby="scheduleModalLabel" aria-hidden="true">
+          <div class="modal-dialog">
+            <div class="modal-content">
+              <form method="post" action="{% url 'schedule_reddit_post' %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="modal-header">
+                  <h5 class="modal-title" id="scheduleModalLabel">Schedule Reddit Post</h5>
+                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                  <input type="text" name="title" placeholder="Title" class="form-control mb-2" required />
+                  <textarea name="content" placeholder="Content (optional)" class="form-control mb-2"></textarea>
+                  <input type="url" name="url" placeholder="URL (optional)" class="form-control mb-2" />
+                  <input type="datetime-local" name="scheduled_time" class="form-control mb-2" required />
+                  <label class="form-label mt-2">Attach Image/Video (optional):</label>
+                  <input type="file" name="media" accept="image/*,video/*" class="form-control mb-2" />
+                </div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                  <button class="btn btn-warning" type="submit">Schedule Post</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Fetch Discord messages and update
+    function loadDiscordMessages() {
+        fetch("{% url 'fetch_discord_messages' %}")
+            .then(res => res.json())
+            .then(data => {
+                const container = document.getElementById('discord-messages');
+                if (data.success) {
+                    container.innerHTML = '';
+                    data.messages.forEach(msg => {
+                        container.innerHTML += `
+                            <div class="p-2 rounded shadow-sm mb-1 d-flex align-items-start" style="background-color: ${msg.author === 'social dashboard' ? '#e9f7ef' : '#fff3cd'};">
+                                <img src="${msg.avatar_url}" alt="avatar" class="rounded-circle me-2" style="width:32px;height:32px;">
+                                <div style="flex:1;">
+                                    <div>
+                                        <strong>${msg.author}</strong>
+                                        <span class="text-muted small float-end">${new Date(msg.timestamp).toLocaleString()}</span>
+                                    </div>
+                                    <div>${msg.content}</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    container.scrollTop = container.scrollHeight;
+                } else {
+                    container.innerHTML = 'Failed to load messages.';
+                }
+            });
+    }
+
+    loadDiscordMessages();
+    setInterval(loadDiscordMessages, 5000);
+
+    // Send Discord message
+    document.getElementById('discord-message-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const messageInput = document.getElementById('discord-message-input');
+        const content = messageInput.value.trim();
+        if (!content) {
+            alert("Please enter a message.");
+            return;
+        }
+
+        fetch("{% url 'send_discord_message' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: new URLSearchParams({ 'content': content })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                messageInput.value = '';
+                loadDiscordMessages();
+            } else {
+                alert('Failed to send message: ' + data.error);
+            }
+        });
+    });
+
+    // Schedule Discord Message
+    document.getElementById('discord-schedule-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const message = document.getElementById('discord-schedule-message').value.trim();
+        const scheduled_time = document.getElementById('discord-schedule-time').value;
+        if (!message || !scheduled_time) {
+            alert("Please enter a message and time.");
+            return;
+        }
+        fetch("{% url 'schedule_discord_message' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: new URLSearchParams({ 'message': message, 'scheduled_time': scheduled_time })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                alert('Message scheduled!');
+                document.getElementById('discord-schedule-form').reset();
+                var modal = bootstrap.Modal.getInstance(document.getElementById('scheduleDiscordModal'));
+                modal.hide();
+            } else {
+                alert('Failed to schedule: ' + data.error);
+            }
+        });
+    });
+
+    // Infinite scroll for Reddit posts
+    let redditAfter = null;
+    let redditLoading = false;
+    let redditEnd = false;
+
+    function renderRedditPosts(posts, append = false) {
+        const container = document.getElementById('reddit-posts');
+        if (!append) container.innerHTML = '';
+        posts.forEach(post => {
+            let mediaHTML = '';
+            if (post.media_type === 'image') {
+                mediaHTML = `<img src="${post.media_url}" alt="Reddit image" class="img-fluid my-2 rounded">`;
+            } else if (post.media_type === 'video') {
+                mediaHTML = `
+                    <video controls class="w-100 my-2 rounded">
+                        <source src="${post.media_url}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>`;
+            }
+            container.innerHTML += `
+                <div class="card mb-2">
+                    <div class="card-body">
+                        <h6>${post.title}</h6>
+                        <div class="mb-1 text-muted small">by ${post.author}</div>
+                        <p>${post.selftext || ''}</p>
+                        ${mediaHTML}
+                        <a href="https://reddit.com${post.permalink}" target="_blank">View on Reddit</a>
+                        <div class="mt-2">
+                            <button onclick="likePost('${post.id}')" class="btn btn-sm btn-outline-primary me-2">Like</button>
+                            <button onclick="commentPost('${post.id}')" class="btn btn-sm btn-outline-secondary">Comment</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    function loadRedditPosts(initial = false) {
+        if (redditLoading || redditEnd) return;
+        redditLoading = true;
+        let url = "{% url 'fetch_reddit_posts' %}";
+        if (redditAfter) url += "?after=" + encodeURIComponent(redditAfter);
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                const container = document.getElementById('reddit-posts');
+                if (data.success) {
+                    if (data.posts.length === 0) {
+                        redditEnd = true;
+                        if (initial && !redditAfter) container.innerHTML = 'No posts found.';
+                        return;
+                    }
+                    renderRedditPosts(data.posts, !initial && !!redditAfter);
+                    redditAfter = data.after || null;
+                    if (!redditAfter) redditEnd = true;
+                } else {
+                    if (initial) container.innerHTML = 'Failed to load Reddit posts.';
+                }
+            })
+            .finally(() => {
+                redditLoading = false;
+            });
+    }
+
+    // Initial load
+    loadRedditPosts(true);
+
+    // Infinite scroll event
+    document.getElementById('reddit-posts').addEventListener('scroll', function() {
+        const el = this;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) {
+            loadRedditPosts();
+        }
+    });
+
+    // Placeholder for like and comment actions
+    function likePost(postId) {
+        alert('Like functionality to be implemented for post ' + postId);
+    }
+
+    function commentPost(postId) {
+        const comment = prompt('Enter your comment:');
+        if (comment) {
+            alert('Comment functionality to be implemented for post ' + postId + ': ' + comment);
+        }
+    }
+</script>
+{% endblock %}
